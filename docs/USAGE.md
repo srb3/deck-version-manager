@@ -28,7 +28,7 @@ Before using DVM, ensure you have the following tools installed:
 ### Quick Installation (Recommended)
 
 ```bash
-curl -s https://raw.githubusercontent.com/KongHQ-CX/deck-version-manager/main/install.sh | bash
+curl -s https://raw.githubusercontent.com/srb3/deck-version-manager/main/install.sh | bash
 ```
 
 Then add DVM to your PATH:
@@ -46,7 +46,7 @@ If you prefer a manual installation:
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/KongHQ-CX/deck-version-manager.git
+   git clone https://github.com/srb3/deck-version-manager.git
    ```
 
 2. Make the script executable:

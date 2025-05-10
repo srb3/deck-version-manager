@@ -20,7 +20,7 @@ DVM allows you to:
 
 ```bash
 # Install DVM
-curl -s https://raw.githubusercontent.com/KongHQ-CX/deck-version-manager/main/install.sh | bash
+curl -s https://raw.githubusercontent.com/srb3/deck-version-manager/main/install.sh | bash
 
 # Add DVM to your PATH (add this to your .bashrc, .zshrc, etc.)
 export PATH="$HOME/.dvm/bin:$PATH"
@@ -30,7 +30,7 @@ export PATH="$HOME/.dvm/bin:$PATH"
 
 ```bash
 # Clone the repository
-git clone https://github.com/KongHQ-CX/deck-version-manager.git
+git clone https://github.com/srb3/deck-version-manager.git
 
 # Copy the script to a location in your PATH
 cp dvm/dvm /usr/local/bin/dvm

@@ -23,14 +23,14 @@ project. We aim to foster an inclusive and welcoming community.
 2. **Clone your fork** to your local machine
 
    ```bash
-   git clone https://github.com/KongHQ-CX/deck-version-manager.git
+   git clone https://github.com/srb3/deck-version-manager.git
    cd dvm
    ```
 
 3. **Add the upstream remote**
 
    ```bash
-   git remote add upstream https://github.com/KongHQ-CX/deck-version-manager.git
+   git remote add upstream https://github.com/srb3/deck-version-manager.git
    ```
 
 4. **Create a new branch** for your feature or `bugfix`

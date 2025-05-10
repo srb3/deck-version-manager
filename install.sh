@@ -7,7 +7,7 @@
 set -e
 
 DVM_DIR="${HOME}/.dvm"
-DVM_REPO="https://raw.githubusercontent.com/KongHQ-CX/deck-version-manager/main"
+DVM_REPO="https://raw.githubusercontent.com/srb3/deck-version-manager/main"
 
 # Colors
 RED='\033[0;31m'
