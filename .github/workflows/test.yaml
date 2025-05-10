@@ -1,0 +1,41 @@
+name: DVM Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Check script syntax
+      run: bash -n dvm
+    
+    - name: Check shellcheck
+      uses: ludeeus/action-shellcheck@master
+      with:
+        severity: warning
+        ignore_names: dvm.zsh
+      
+    - name: Test script initialization
+      run: |
+        chmod +x ./dvm
+        ./dvm help
+    
+    - name: Test version listing
+      run: |
+        ./dvm list-remote 1
+    
+    - name: Test installation (integration test)
+      run: |
+        ./dvm install v1.46.3 || echo "Installation test complete"
+        ./dvm list

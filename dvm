@@ -1,0 +1,481 @@
+#!/usr/bin/env bash
+#
+# dvm - Deck Version Manager
+# A simple version manager for Kong's Deck, inspired by RVM
+# https://github.com/Kong/deck/releases
+#
+
+set -e
+
+VERSION="0.1.0"
+DECKVM_DIR="${HOME}/.dvm"
+DECK_RELEASES_URL="https://github.com/Kong/deck/releases"
+DECK_DOWNLOAD_URL="https://github.com/Kong/deck/releases/download"
+CURRENT_VERSION_FILE="${DECKVM_DIR}/current"
+VERSIONS_DIR="${DECKVM_DIR}/versions"
+BIN_DIR="${DECKVM_DIR}/bin"
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+
+# Convert architecture to deck format
+if [ "${ARCH}" = "x86_64" ]; then
+  ARCH="amd64"
+elif [ "${ARCH}" = "aarch64" ] || [ "${ARCH}" = "arm64" ]; then
+  ARCH="arm64"
+fi
+
+# Display usage information
+usage() {
+  echo "dvm - Deck Version Manager v${VERSION}"
+  echo "Usage: dvm [command]"
+  echo ""
+  echo "Commands:"
+  echo "  list-remote [PAGES]  List available deck versions (optional: number of pages to fetch, default: 1)"
+  echo "  list                 List installed deck versions"
+  echo "  install VERSION      Install a specific deck version"
+  echo "  uninstall VERSION    Uninstall a specific deck version"
+  echo "  use VERSION          Set a specific deck version as current"
+  echo "  current              Show the current deck version"
+  echo "  help                 Show this help message"
+  echo ""
+  echo "Examples:"
+  echo "  dvm list-remote       # Show versions from the first page"
+  echo "  dvm list-remote 3     # Show versions from the first 3 pages"
+  echo "  dvm install v1.46.3   # Install version v1.46.3"
+  echo "  dvm uninstall v1.46.3 # Uninstall version v1.46.3"
+  echo "  dvm use v1.46.3       # Switch to version v1.46.3"
+}
+
+# Print path setup instructions
+print_path_instructions() {
+  echo ""
+  echo "=============================================================="
+  echo " To complete the installation, add the following to your shell"
+  echo " configuration file (.bashrc, .zshrc, etc.):"
+  echo ""
+  echo " export PATH=\"\$HOME/.dvm/bin:\$PATH\""
+  echo "=============================================================="
+  echo ""
+}
+
+# Check if required tools are installed
+check_requirements() {
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is required but not installed. Please install curl."
+    exit 1
+  fi
+  
+  if ! command -v tar >/dev/null 2>&1; then
+    echo "tar is required but not installed. Please install tar."
+    exit 1
+  fi
+  
+  if ! command -v grep >/dev/null 2>&1; then
+    echo "grep is required but not installed. Please install grep."
+    exit 1
+  fi
+}
+
+# Initialize dvm directories
+init() {
+  echo "called init"
+  if [ ! -d "${DECKVM_DIR}" ]; then
+    mkdir -p "${DECKVM_DIR}"
+    echo "Created ${DECKVM_DIR}"
+  fi
+  
+  if [ ! -d "${VERSIONS_DIR}" ]; then
+    mkdir -p "${VERSIONS_DIR}"
+    echo "Created ${VERSIONS_DIR}"
+  fi
+  
+  if [ ! -d "${BIN_DIR}" ]; then
+    mkdir -p "${BIN_DIR}"
+    echo "Created ${BIN_DIR}"
+  fi
+  
+  # Create dvm symlink if it doesn't exist
+  if [ ! -f "${BIN_DIR}/dvm" ]; then
+    ln -sf "$(realpath "$0")" "${BIN_DIR}/dvm"
+    echo "Created dvm symlink in ${BIN_DIR}"
+  fi
+}
+
+# List available remote versions with optional page count
+list_remote() {
+  local pages=${1:-1}  # Default to 1 page if not specified
+  
+  echo "Fetching available deck versions (first ${pages} page(s))..."
+  
+  # Create a temporary file to store versions
+  local temp_file
+  temp_file=$(mktemp)
+  
+  # Fetch the specified number of pages
+  for page in $(seq 1 "$pages"); do
+    echo "Fetching page ${page}..."
+    
+    # Fetch the current page
+    local result
+    result=$(curl -s "${DECK_RELEASES_URL}?page=${page}")
+    
+    # Extract versions from the current page
+    echo "$result" | 
+      grep -o 'href="/Kong/deck/releases/tag/v[0-9]\+\.[0-9]\+\.[0-9]\+"' | 
+      grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' >> "$temp_file"
+    
+    # If page doesn't have any versions, break early
+    if ! grep -q 'v[0-9]\+\.[0-9]\+\.[0-9]\+' <<< "$result"; then
+      echo "No more versions found. Stopping at page ${page}."
+      break
+    fi
+  done
+  
+  # Display the unique versions sorted
+  echo "Available versions"
+  sort -V -u "$temp_file"
+  
+  # Clean up
+  rm "$temp_file"
+}
+
+# Helper function to list versions in a cross-platform way
+versions_list() {
+  local dir="$1"
+  
+  # Check if directory exists
+  if [ ! -d "$dir" ]; then
+    return 0
+  fi
+  
+  # Simpler approach that avoids both ls and find+xargs
+  # This works on both GNU and BSD systems
+  for path in "$dir"/*; do
+    if [ -d "$path" ]; then
+      basename "$path"
+    fi
+  done | sort -V
+}
+
+# List all installed versions
+list_installed() {
+  echo "Installed deck versions:"
+  
+  if [ ! -d "${VERSIONS_DIR}" ] || [ -z "$(ls -A "${VERSIONS_DIR}" 2>/dev/null)" ]; then
+    echo "  No versions installed yet."
+    return
+  fi
+  
+  local current=""
+  if [ -f "${CURRENT_VERSION_FILE}" ]; then
+    current=$(cat "${CURRENT_VERSION_FILE}")
+  fi
+  
+  for version in $(versions_list "${VERSIONS_DIR}"); do
+    if [ "${version}" = "${current}" ]; then
+      echo "  ${version} (current)"
+    else
+      echo "  ${version}"
+    fi
+  done
+}
+
+# Install a specific version
+install_version() {
+  local version=$1
+  local auto_use=${2:-false}  # Add auto_use parameter with default to false
+  
+  # Add 'v' prefix if not provided
+  if [[ ${version} != v* ]]; then
+    version_num=${version}
+    version="v${version}"
+  else
+    version_num=${version:1}
+  fi
+  
+  # Verify if this is a known version
+  echo "Verifying version ${version}..."
+  
+  # Create temporary directory
+  local temp_dir
+  temp_dir=$(mktemp -d)
+  
+  # Check if version is already installed
+  if [ -d "${VERSIONS_DIR}/${version}" ]; then
+    echo "Version ${version} is already installed."
+
+    # If auto_use is true, use this version
+    if [ "$auto_use" = true ]; then
+      use_version "${version}"
+    fi
+
+    return 0
+  fi
+  
+  echo "Installing deck ${version}..."
+  
+  # Determine package format based on OS
+  case "${OS}" in
+    linux)
+      local package="deck_${version_num}_linux_${ARCH}.tar.gz"
+      ;;
+    darwin)
+      # For Darwin/macOS, try "all" architecture first
+      local package="deck_${version_num}_darwin_all.tar.gz"
+      ;;
+    *)
+      echo "Unsupported operating system: ${OS}"
+      exit 1
+      ;;
+  esac
+  
+  # Download and extract
+  local download_url="${DECK_DOWNLOAD_URL}/${version}/${package}"
+  echo "Downloading from ${download_url}..."
+  
+  if ! curl -L -o "${temp_dir}/${package}" "${download_url}"; then
+    echo "Failed to download ${download_url}"
+    
+    # Try alternate architecture format for Darwin
+    if [ "${OS}" = "darwin" ]; then
+      echo "Trying with amd64 architecture instead..."
+      package="deck_${version_num}_darwin_amd64.tar.gz"
+      
+      download_url="${DECK_DOWNLOAD_URL}/${version}/${package}"
+      echo "Downloading from ${download_url}..."
+      
+      if ! curl -L -o "${temp_dir}/${package}" "${download_url}"; then
+        echo "Failed to download alternate architecture. The requested version may not exist."
+        rm -rf "${temp_dir}"
+        exit 1
+      fi
+    else
+      echo "The requested version may not exist or there might be network issues."
+      rm -rf "${temp_dir}"
+      exit 1
+    fi
+  fi
+  
+  # Check file size to verify it's a valid download
+  local file_size
+  file_size=$(stat -f%z "${temp_dir}/${package}" 2>/dev/null || stat -c%s "${temp_dir}/${package}")
+  if [ "${file_size}" -lt 1000000 ]; then  # Less than ~1MB is probably not the binary
+    echo "Warning: Downloaded file is too small (${file_size} bytes). This may not be a valid release."
+    echo "File content:"
+    head -n 10 "${temp_dir}/${package}"
+    
+    echo "Installation aborted."
+    rm -rf "${temp_dir}"
+    return 1
+  fi
+  
+  # Create the version directory
+  mkdir -p "${VERSIONS_DIR}/${version}"
+  
+  # Extract the tarball - with error handling
+  if ! tar -xzf "${temp_dir}/${package}" -C "${temp_dir}"; then
+    echo "Failed to extract the tarball. The downloaded file may be corrupted."
+    echo "Checking file content..."
+    file "${temp_dir}/${package}"
+    
+    # Try using gunzip separately if tar failed
+    echo "Trying alternative extraction method..."
+    gunzip -c "${temp_dir}/${package}" | tar -xf - -C "${temp_dir}" || {
+      echo "Both extraction methods failed. Please check the downloaded file."
+      rm -rf "${temp_dir}"
+      exit 1
+    }
+  fi
+  
+  # Move the binary to versions directory (handle case when binary might be in a subdirectory)
+  if [ -f "${temp_dir}/deck" ]; then
+    mv "${temp_dir}/deck" "${VERSIONS_DIR}/${version}/"
+  else
+    # Try to find the deck binary in subdirectories
+    find "${temp_dir}" -name "deck" -type f -exec mv {} "${VERSIONS_DIR}/${version}/" \;
+    
+    # Check if we found and moved the binary
+    if [ ! -f "${VERSIONS_DIR}/${version}/deck" ]; then
+      echo "Could not find the deck binary in the extracted archive."
+      ls -la "${temp_dir}"
+      rm -rf "${temp_dir:?}" "${VERSIONS_DIR:?}/${version:?}"
+      exit 1
+    fi
+  fi
+  
+  # Make the binary executable
+  chmod +x "${VERSIONS_DIR}/${version}/deck"
+  
+  # Cleanup
+  rm -rf "${temp_dir}"
+  
+  echo "Successfully installed deck ${version}"
+  
+  # If auto_use is true or this is the first version installed, set it as current
+  if [ "$auto_use" = true ] || [ ! -f "${CURRENT_VERSION_FILE}" ]; then
+    use_version "${version}"
+  fi
+}
+
+# Set a version as current
+use_version() {
+  local version=$1
+  
+  # Add 'v' prefix if not provided
+  if [[ ${version} != v* ]]; then
+    version="v${version}"
+  fi
+  
+  # Check if version is installed
+  if [ ! -d "${VERSIONS_DIR}/${version}" ]; then
+    echo "Version ${version} is not installed. Please install it first."
+    echo "Run: dvm install ${version}"
+    exit 1
+  fi
+  
+  # Update current version file
+  echo "${version}" > "${CURRENT_VERSION_FILE}"
+  
+  # Create/update symlink
+  if [ -f "${BIN_DIR}/deck" ]; then
+    rm "${BIN_DIR}/deck"
+  fi
+  ln -sf "${VERSIONS_DIR}/${version}/deck" "${BIN_DIR}/deck"
+  
+  echo "Now using deck ${version}"
+}
+
+# Show current version
+show_current() {
+  if [ ! -f "${CURRENT_VERSION_FILE}" ]; then
+    echo "No deck version is currently selected."
+    echo "Use 'dvm install VERSION' to install a version first."
+    return 1
+  fi
+  
+  local current
+  current=$(cat "${CURRENT_VERSION_FILE}")
+  echo "Current deck version: ${current}"
+  
+  # Verify the binary exists
+  if [ ! -f "${VERSIONS_DIR}/${current}/deck" ]; then
+    echo "Warning: The binary for version ${current} seems to be missing."
+    return 1
+  fi
+  
+  # Show deck version
+  "${VERSIONS_DIR}/${current}/deck" version
+}
+
+# Uninstall a specific version
+uninstall_version() {
+  local version=$1
+  
+  # Add 'v' prefix if not provided
+  if [[ ${version} != v* ]]; then
+    version="v${version}"
+  fi
+  
+  # Check if version is installed
+  if [ ! -d "${VERSIONS_DIR}/${version}" ]; then
+    echo "Version ${version} is not installed."
+    return 1
+  fi
+  
+  # Check if it's the current version
+  if [ -f "${CURRENT_VERSION_FILE}" ] && [ "$(cat "${CURRENT_VERSION_FILE}")" = "${version}" ]; then
+    echo "Cannot uninstall the current version. Please use a different version first."
+    echo "Available versions:"
+    list_installed
+    return 1
+  fi
+  
+  # Remove the version directory
+  rm -rf "${VERSIONS_DIR:?}/${version:?}"
+  echo "Successfully uninstalled deck ${version}"
+  
+  # If there are no versions left, remove the current version file
+  if [ -z "$(ls -A "${VERSIONS_DIR}")" ]; then
+    rm -f "${CURRENT_VERSION_FILE}"
+    rm -f "${BIN_DIR}/deck"
+    echo "No versions remain installed."
+  fi
+}
+
+# Main function
+main() {
+  # Always check requirements
+  check_requirements
+  
+  # Parse command
+  cmd=$1
+  shift || true
+  
+  # Always initialize directories, regardless of command
+  init
+  
+  case "${cmd}" in
+    list-remote)
+      # Check if a number is provided for pages
+      if [[ $1 =~ ^[0-9]+$ ]]; then
+        list_remote "$1"
+      else
+        list_remote 1  # Default to 1 page
+      fi
+      ;;
+    list)
+      list_installed
+      ;;
+    install)
+      if [ $# -lt 1 ]; then
+        echo "Error: VERSION is required for install command."
+        usage
+        exit 1
+      fi
+      install_version "$1" false
+      print_path_instructions
+      ;;
+    install-use)
+      if [ $# -lt 1 ]; then
+        echo "Error: VERSION is required for install-use command."
+        usage
+        exit 1
+      fi
+      install_version "$1" true
+      print_path_instructions
+      ;;
+    uninstall)
+      if [ $# -lt 1 ]; then
+        echo "Error: VERSION is required for uninstall command."
+        usage
+        exit 1
+      fi
+      uninstall_version "$1"
+      ;;
+    use)
+      if [ $# -lt 1 ]; then
+        echo "Error: VERSION is required for use command."
+        usage
+        exit 1
+      fi
+      use_version "$1"
+      print_path_instructions
+      ;;
+    current)
+      show_current
+      ;;
+    help|--help|-h)
+      usage
+      ;;
+    "")
+      usage
+      ;;
+    *)
+      echo "Unknown command: ${cmd}"
+      usage
+      exit 1
+      ;;
+  esac
+}
+# Call main with all arguments
+main "$@"

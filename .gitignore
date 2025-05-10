@@ -1,0 +1,23 @@
+# OS specific files
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Editor directories and files
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Temporary files
+*.tmp
+*.log
+tmp/
+
+# Test directories (for local testing)
+test_env/
+
+# Local development environment
+.env
+.envrc
