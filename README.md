@@ -18,12 +18,9 @@ DVM allows you to:
 
 ### Quick Install
 
-
 ```bash
 # Install DVM
-curl -s 
-https://raw.githubusercontent.com/KongHQ-CX/deck-version-manager/main/install.sh
-| bash
+curl -s https://raw.githubusercontent.com/KongHQ-CX/deck-version-manager/main/install.sh | bash
 
 # Add DVM to your PATH (add this to your .bashrc, .zshrc, etc.)
 export PATH="$HOME/.dvm/bin:$PATH"
